@@ -6,55 +6,23 @@ import com.varabyte.kotter.foundation.input.onInputEntered
 import com.varabyte.kotter.foundation.input.runUntilInputEntered
 import com.varabyte.kotter.foundation.liveVarOf
 import com.varabyte.kotter.foundation.session
-import com.varabyte.kotter.foundation.text.cyan
 import com.varabyte.kotter.foundation.text.text
 import com.varabyte.kotter.foundation.text.textLine
 import kotlinx.coroutines.*
+import net.freshplatform.kmp_cli.sections.projectFolderNameSection
+import net.freshplatform.kmp_cli.sections.useComposeMultiplatformSection
 import java.io.File
 import java.io.IOException
 import java.nio.file.Paths
 import java.util.concurrent.TimeUnit
 
 fun main(args: Array<String>) = runBlocking {
-
     session {
         run {
-            var folderName by liveVarOf("app")
-            section {
-                textLine("The folder you choose here will be created under your current path.")
-                textLine("You can enter `.` if you want to use the current directory.\n")
-                textLine("Specify a folder for your project:")
-                text("> "); input(Completions(folderName))
-
-            }.runUntilInputEntered {
-                onInputEntered {
-                    if (input.trim().isNotBlank()) {
-                        folderName = input
-                    }
-                }
-            }
-
-            val isFolderExists = File(folderName).exists()
-            if (isFolderExists) {
-                section {
-                    text("There is already a folder with name $folderName. Please delete it or choose another name first.")
-                }.run { }
-                return@session
-            }
-
-            var useComposeMultiplatform by liveVarOf(false)
-            section {
-                text("Would you use "); cyan { text("Compose Multiplatform") }; textLine(" to share UI? (Y/n)")
-                text("> "); input(Completions("yes", "no"), initialText = "y")
-
-            }.runUntilInputEntered {
-                onInputEntered { useComposeMultiplatform = "yes".startsWith(input.lowercase()) }
-            }
+            val projectFolderName = projectFolderNameSection()
+            val useComposeMultiplatform = useComposeMultiplatformSection()
 
             if (!useComposeMultiplatform) {
-                section {
-                    text("Sorry but only Compose multiplatform is supported for now.")
-                }.run { }
                 return@session
             }
 
@@ -83,19 +51,6 @@ fun main(args: Array<String>) = runBlocking {
                 return@session
             }
 
-            var projectId by liveVarOf("org.example.${folderName}")
-            section {
-                textLine("Note: The group ID should uniquely identify your project and organization.")
-                textLine("'io.github.(username).(projectname)' can work for a hobby project.")
-                textLine("What is the group ID for your project?")
-                text("> "); input(Completions(projectId))
-
-            }.runUntilInputEntered {
-                onInputEntered {
-                    projectId = input
-                }
-            }
-
             val repo = when (targetPlatforms) {
                 TargetPlatforms.Mobile -> Constants.ComposeMultiplatform.MOBILE
                 TargetPlatforms.Desktop -> Constants.ComposeMultiplatform.DESKTOP
@@ -104,13 +59,19 @@ fun main(args: Array<String>) = runBlocking {
             }
 
             try {
-                val command = "git clone $repo $folderName"
+                val coroutineScope = CoroutineScope(Dispatchers.IO)
+                val command = "git clone $repo $projectFolderName"
                 val currentDirectory = System.getProperty("user.dir")
-                runBlocking {
+                val job = coroutineScope.launch {
                     command.runCommand(File(currentDirectory))
-                    val newProject = Paths.get(currentDirectory).resolve(folderName)
+                    val newProject = Paths.get(currentDirectory).resolve(projectFolderName)
                     val gitFolder = newProject.resolve(".git")
                     gitFolder.toFile().delete()
+                }
+                section {
+                    text("Loading...")
+                }.run {
+                    job.join()
                 }
             } catch (e: Exception) {
                 println("Failure: $e")
